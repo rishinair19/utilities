@@ -1,0 +1,58 @@
+
+#!/bin/bash
+filename="user-list.txt"
+set -x
+
+while read -r line; do
+   NEW_WORD=$line
+   OLD_WORD="user"
+   LINE_NUMBER="4"
+   FILENAME2="/master/$line/main.tf"
+   TF_PATH="/master/$line"
+   echo "Created directory $TF_PATH"
+   mkdir -p "$TF_PATH"
+   cp main.tf var.tf versions.tf "$TF_PATH/"
+   COUNTER=1
+   cat $FILENAME2
+
+   while IFS= read -r LINE; do
+      if [ $COUNTER -eq $LINE_NUMBER ]; then
+         echo "${LINE//$OLD_WORD/$NEW_WORD}" >> temp
+      else
+         echo "$LINE" >> temp
+      fi
+      ((COUNTER++))
+   done < "$FILENAME2"
+
+   mv temp "$FILENAME2"
+   cd $TF_PATH
+   terraform init
+   terraform import mysql_user.user $line@'%'
+   terraform import mysql_grant.user_grant $line@'%'
+   terraform init
+   terraform show >> /tmp/$line
+
+   START_LINE=15
+   END_LINE=20
+   head -n $(($START_LINE - 1)) main.tf > temp
+   tail -n +$(($END_LINE + 1)) main.tf >> temp
+
+   mv temp main.tf
+   cat /tmp/$line >> main.tf
+
+   cat main.tf
+
+   awk -v line=15 'NR != line' main.tf > temp.txt 
+
+   cat main.tf
+
+   grep -v "id         =" temp.txt >> temp2.txt
+   mv temp2.txt main.tf
+
+   cat main.tf
+
+   rm -f /tmp/$line temp temp.txt temp2.txt
+
+done < $filename
+
+
