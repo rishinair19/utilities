@@ -1,0 +1,11 @@
+
+#!/bin/bash
+filename="/lambda-list"
+set -x
+
+while read -r line; do
+   terraform init
+   function=$(echo "$line" | sed 's/-/_/g')
+   terraform import aws_lambda_function.$function $line
+done < $filename
+
