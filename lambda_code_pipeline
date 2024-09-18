@@ -1,0 +1,53 @@
+
+      steps:
+        - | 
+            aws configure set aws_access_key_id $AWS_PROD_ACCESS_KEY_ID
+            aws configure set aws_secret_access_key $AWS_PROD_SECRET_ACCESS_KEY
+
+            changed_files=$(git diff-tree --no-commit-id --name-status -r HEAD^ HEAD | grep -E '^[AM]' | awk '{print $2}')
+
+            git config --global user.email "you@example.com"
+            git config --global user.name "Automation"
+            git clone $repo
+ 
+
+            for lambda in $changed_files; do
+
+              lambda_names=$(echo $lambda | cut -d'/' -f1)
+              echo "Starting deployment for $lambda_names, lambda file path is $lambda"
+              zip -j "$lambda_names/$lambda_names.zip" "$lambda"  
+              current_time=$(date +%Y-%m-%d_%H-%M-%S)
+              s3_path="${lambda_names}/${lambda_names}-${current_time}.zip"
+              aws s3 cp "$lambda_names/$lambda_names.zip" s3://$bucket/$s3_path
+              cd $lambda_names
+              function=$(echo "$lambda_names" | tr '[:upper:]' '[:lower:]' | tr '-' '_')
+              sed -i "/resource \"aws_lambda_function\" \"$function\"/,/}/ s|s3_key *= *\"[^\"]*\"|s3_key = \"$s3_path\"|" "$lambda_names.tf"
+              cd ../../../../../../
+              pwd
+            done
+            
+            cd $repo
+            current_time=$(date +%Y-%m-%d_%H-%M-%S)
+            NEW_BRANCH="feature-${current_time}"
+            TARGET_BRANCH="main"
+            PR_TITLE="Lambda code changes"
+            git checkout -b ${NEW_BRANCH}
+            git add .
+            git commit -m "${PR_TITLE}"
+            git push origin ${NEW_BRANCH}
+            CREATE_PR_JSON=$(jq -n \
+                              --arg title "$PR_TITLE" \
+                              --arg head "$NEW_BRANCH" \
+                              --arg base "$TARGET_BRANCH" \
+                              '{title: $title, head: $head, base: $base}')
+                              
+            PR_RESPONSE=$(curl -s -X POST -H "Authorization: token ${ACCESS_TOKEN}" \
+                -d "$CREATE_PR_JSON" \
+                "https://api.github.com/repos/$repo/pulls")
+
+            PR_LINK=$(echo "$PR_RESPONSE" | jq -r '.html_url')
+            slack_webhook="$SRE_SLACK_WEBHOOK"
+            curl -X POST --data-urlencode "payload={\"username\": \"webhookbot\", \"text\": \"A Pull request has been created for AWS Lambda. Approve and merge it to deploy new lambda code \n: $PR_LINK \", \"icon_emoji\": \":bar_chart\"}" $slack_webhook
+
+
+  
